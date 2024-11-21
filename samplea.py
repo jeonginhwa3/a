@@ -114,11 +114,11 @@ def process_and_display(uploaded_image):
         corrected_image = illumination_correction(image_np)
         binary_image = masking(corrected_image)
         eroded_image = erosion(binary_image)
+        eroded_image_vis = (eroded_image * 255).astype(np.uint8)  # 오류 방지: 명확히 0~255로 변환
         labeled_image, object_count = connected(eroded_image)
 
         # 시각화 데이터 준비
         corrected_image_vis = np.clip(corrected_image, 0, 255).astype(np.uint8)
-        eroded_image_vis = (eroded_image * 255).astype(np.uint8)
         labeled_image_vis = (labeled_image / labeled_image.max() * 255).astype(np.uint8) if labeled_image.max() > 0 else labeled_image
 
         # 시각화
