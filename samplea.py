@@ -1,7 +1,6 @@
 import streamlit as st
 from PIL import Image
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.ndimage import binary_closing, binary_opening, label, gaussian_filter, binary_erosion
 
 # Streamlit 페이지 설정
@@ -21,26 +20,22 @@ uploaded_file = st.sidebar.file_uploader("Upload an image", type=["png", "jpg", 
 
 # Task 1: 밝은 배경에서 과자 개수 세기
 def binarize_image_task1(image_array):
-    """밝은 배경에서 물체를 분리하기 위한 이진화 처리 (과자 카운팅용)"""
-    binary_image = (image_array < 180).astype(np.int8)  # 밝은 배경에서 어두운 객체 추출
+    binary_image = (image_array < 180).astype(np.int8)
     return binary_image
 
 # Task 2: 책상 위에서 펜 개수 세기
 def binarize_image_task2(image_array):
-    """책상 위 펜 카운팅을 위한 이진화 처리"""
-    binary_image = (image_array < 130).astype(np.int8)  # 어두운 배경에서 밝은 객체 추출
+    binary_image = (image_array < 130).astype(np.int8)
     return binary_image
 
 # Task 1 & Task 2에 적용될 전처리
 def morphological_processing(binary_image):
-    """객체 내부 빈틈 메우기 및 노이즈 제거"""
-    closed_image = binary_closing(binary_image, structure=np.ones((5, 5)))  # 클로징으로 빈틈 메우기
-    opened_image = binary_opening(closed_image, structure=np.ones((5, 5)))  # 오프닝으로 노이즈 제거
+    closed_image = binary_closing(binary_image, structure=np.ones((5, 5)))
+    opened_image = binary_opening(closed_image, structure=np.ones((5, 5)))
     return opened_image
 
 # Task 1 & Task 2: 객체 수 카운팅
 def count_objects(binary_image, size_threshold=50):
-    """객체 수 카운팅"""
     labeled_image, num_features = label(binary_image)
     object_sizes = np.bincount(labeled_image.flatten())
     valid_objects = object_sizes > size_threshold
@@ -50,13 +45,11 @@ def count_objects(binary_image, size_threshold=50):
 
 # Task 3: 쌀알 개수 세기
 def masking(image_np):
-    """Task 3: 바이너리 마스크 생성"""
-    f = np.array(image_np[:, :, 0])  # R 채널 사용 (Grayscale 변환)
-    binary_image = (f > 70).astype(np.int8)  # 밝기 기준으로 바이너리화
+    f = np.array(image_np[:, :, 0])
+    binary_image = (f > 70).astype(np.int8)
     return binary_image
 
 def illumination_correction(image_np):
-    """Task 3: 조명 보정"""
     blurred = gaussian_filter(image_np.astype(float), sigma=30)
     corrected_image = image_np - blurred
     corrected_image = np.clip(corrected_image, 0, 255).astype(np.uint8)
@@ -65,10 +58,10 @@ def illumination_correction(image_np):
 def erosion(binary_image):
     """Task 3: Erosion 연산"""
     eroded_image = binary_erosion(binary_image, structure=np.ones((3, 3))).astype(np.int8)
+    eroded_image = (eroded_image > 0).astype(np.int8)  # 값이 명확히 0 또는 1인지 확인
     return eroded_image
 
 def connected(binary_image):
-    """Task 3: 연결된 성분 분석"""
     labeled_image, num_features = label(binary_image)
     return labeled_image, num_features
 
@@ -82,9 +75,9 @@ def process_and_display(uploaded_image):
         processed_image = morphological_processing(binary_image)
         labeled_image, object_count = count_objects(processed_image, size_threshold=500)
         
-        # 데이터 타입과 범위 조정
+        # 시각화 데이터 준비
         processed_image_vis = (processed_image * 255).astype(np.uint8)
-        labeled_image_vis = (labeled_image / labeled_image.max() * 255).astype(np.uint8)
+        labeled_image_vis = (labeled_image / labeled_image.max() * 255).astype(np.uint8) if labeled_image.max() > 0 else labeled_image
 
         # 시각화
         col1, col2, col3 = st.columns(3)
@@ -102,9 +95,9 @@ def process_and_display(uploaded_image):
         processed_image = morphological_processing(binary_image)
         labeled_image, object_count = count_objects(processed_image, size_threshold=500)
         
-        # 데이터 타입과 범위 조정
+        # 시각화 데이터 준비
         processed_image_vis = (processed_image * 255).astype(np.uint8)
-        labeled_image_vis = (labeled_image / labeled_image.max() * 255).astype(np.uint8)
+        labeled_image_vis = (labeled_image / labeled_image.max() * 255).astype(np.uint8) if labeled_image.max() > 0 else labeled_image
 
         # 시각화
         col1, col2, col3 = st.columns(3)
@@ -117,16 +110,16 @@ def process_and_display(uploaded_image):
         st.subheader(f"Total number of pens detected: {object_count}")
 
     elif task == "Task 3: Count grains on a dark background":
-        image_np = np.array(image)  # RGB 배열
+        image_np = np.array(image)
         corrected_image = illumination_correction(image_np)
         binary_image = masking(corrected_image)
         eroded_image = erosion(binary_image)
         labeled_image, object_count = connected(eroded_image)
 
-        # 데이터 타입과 범위 조정
+        # 시각화 데이터 준비
         corrected_image_vis = np.clip(corrected_image, 0, 255).astype(np.uint8)
         eroded_image_vis = (eroded_image * 255).astype(np.uint8)
-        labeled_image_vis = (labeled_image / labeled_image.max() * 255).astype(np.uint8)
+        labeled_image_vis = (labeled_image / labeled_image.max() * 255).astype(np.uint8) if labeled_image.max() > 0 else labeled_image
 
         # 시각화
         col1, col2, col3, col4 = st.columns(4)
