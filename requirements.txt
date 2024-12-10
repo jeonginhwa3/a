@@ -3,4 +3,9 @@ numpy
 pandas
 matplotlib
 scipy
-
+torch
+torchvision
+ultralytics
+opencv-python
+opencv-python-headless
+pillow
