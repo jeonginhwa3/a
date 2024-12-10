@@ -1,142 +1,122 @@
 import streamlit as st
-from PIL import Image
+import torch
+import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-from scipy.ndimage import binary_closing, binary_opening, label, gaussian_filter, binary_erosion
+from torchvision import transforms
+from ultralytics import YOLO
+import tempfile
+from io import BytesIO
 
+# ZeroDCE 모델 정의
+class enhance_net_nopool(torch.nn.Module):
+    def __init__(self):
+        super(enhance_net_nopool, self).__init__()
+        self.relu = torch.nn.ReLU(inplace=True)
+        number_f = 32
+        self.e_conv1 = torch.nn.Conv2d(3, number_f, 3, 1, 1, bias=True)
+        self.e_conv2 = torch.nn.Conv2d(number_f, number_f, 3, 1, 1, bias=True)
+        self.e_conv3 = torch.nn.Conv2d(number_f, number_f, 3, 1, 1, bias=True)
+        self.e_conv4 = torch.nn.Conv2d(number_f, number_f, 3, 1, 1, bias=True)
+        self.e_conv5 = torch.nn.Conv2d(number_f * 2, number_f, 3, 1, 1, bias=True)
+        self.e_conv6 = torch.nn.Conv2d(number_f * 2, number_f, 3, 1, 1, bias=True)
+        self.e_conv7 = torch.nn.Conv2d(number_f * 2, 24, 3, 1, 1, bias=True)
 
-# Streamlit 페이지 설정
-st.set_page_config(layout="wide", page_title="Object Counting")
-st.title("Automatic Object Counting")
+    def forward(self, x):
+        x1 = self.relu(self.e_conv1(x))
+        x2 = self.relu(self.e_conv2(x1))
+        x3 = self.relu(self.e_conv3(x2))
+        x4 = self.relu(self.e_conv4(x3))
+        x5 = self.relu(self.e_conv5(torch.cat([x3, x4], 1)))
+        x6 = self.relu(self.e_conv6(torch.cat([x2, x5], 1)))
+        x_r = torch.tanh(self.e_conv7(torch.cat([x1, x6], 1)))
+        r1, r2, r3, r4, r5, r6, r7, r8 = torch.split(x_r, 3, dim=1)
+        x = x + r1 * (torch.pow(x, 2) - x)
+        x = x + r2 * (torch.pow(x, 2) - x)
+        x = x + r3 * (torch.pow(x, 2) - x)
+        enhance_image_1 = x + r4 * (torch.pow(x, 2) - x)
+        x = enhance_image_1 + r5 * (torch.pow(enhance_image_1, 2) - enhance_image_1)
+        x = x + r6 * (torch.pow(x, 2) - x)
+        x = x + r7 * (torch.pow(x, 2) - x)
+        enhance_image = x + r8 * (torch.pow(x, 2) - x)
+        return enhance_image_1, enhance_image
 
-# 작업 선택 옵션
-task = st.sidebar.selectbox(
-    "Select a task",
-    ("Task 1: Count cookies on a bright background", 
-     "Task 2: Count pens on a desk", 
-     "Task 3: Count grains on a dark background")
-)
+# 모델 로드
+def load_enhancement_model(pth_path):
+    model = enhance_net_nopool()
+    model.load_state_dict(torch.load(pth_path, map_location=torch.device("cpu")))
+    model.eval()
+    return model
 
-# 파일 업로드
-uploaded_file = st.sidebar.file_uploader("Upload an image", type=["png", "jpg", "jpeg", "tif"])
+# YOLOv8 모델 로드
+def load_yolo_model():
+    model = YOLO("yolov8n.pt")  # YOLOv8 모델 사용
+    return model
 
+# 프레임 전처리
+def preprocess_frame(frame):
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((256, 256)),
+        transforms.ToTensor(),
+    ])
+    return transform(frame).unsqueeze(0)
 
-# Task 1: 밝은 배경에서 과자 개수 세기
-def binarize_image_task1(image_array):
-    """밝은 배경에서 물체를 분리하기 위한 이진화 처리 (과자 카운팅용)"""
-    binary_image = (image_array < 180).astype(np.int8)  # 밝은 배경에서 어두운 객체 추출
-    return binary_image
+# 비디오 처리 함수
+def process_video(input_path, output_path, yolo_model, enhancement_model):
+    cap = cv2.VideoCapture(input_path)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, 30.0, (256, 256))
 
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-# Task 2: 책상 위에서 펜 개수 세기
-def binarize_image_task2(image_array):
-    """책상 위 펜 카운팅을 위한 이진화 처리"""
-    binary_image = (image_array < 130).astype(np.int8)  # 어두운 배경에서 밝은 객체 추출
-    return binary_image
+        results = yolo_model(frame)
+        confidence_threshold = 0.5
+        detected_frame = results[0].plot() if results[0].boxes is not None else None
 
+        input_tensor = preprocess_frame(frame)
+        _, enhanced_frame = enhancement_model(input_tensor)
+        enhanced_frame = enhanced_frame.squeeze(0).detach().numpy().transpose(1, 2, 0)
+        enhanced_frame = np.clip(enhanced_frame, 0, 1) * 255
+        enhanced_frame = enhanced_frame.astype(np.uint8)
 
-# Task 1 & Task 2에 적용될 전처리
-def morphological_processing(binary_image):
-    """객체 내부 빈틈 메우기 및 노이즈 제거"""
-    closed_image = binary_closing(binary_image, structure=np.ones((5, 5)))  # 클로징으로 빈틈 메우기
-    opened_image = binary_opening(closed_image, structure=np.ones((5, 5)))  # 오프닝으로 노이즈 제거
-    return opened_image
+        if detected_frame is not None:
+            detected_frame_resized = cv2.resize(detected_frame, (256, 256))
+            enhanced_frame_resized = cv2.resize(enhanced_frame, (256, 256))
+            if detected_frame_resized.shape[2] != enhanced_frame_resized.shape[2]:
+                enhanced_frame_resized = cv2.cvtColor(enhanced_frame_resized, cv2.COLOR_GRAY2BGR)
+            final_frame = cv2.addWeighted(detected_frame_resized, 0.7, enhanced_frame_resized, 0.3, 0)
+            out.write(final_frame)
+        else:
+            enhanced_frame_resized = cv2.resize(enhanced_frame, (256, 256))
+            out.write(enhanced_frame_resized)
 
+    cap.release()
+    out.release()
 
-# Task 1 & Task 2: 객체 수 카운팅
-def count_objects(binary_image, size_threshold=50):
-    """객체 수 카운팅"""
-    labeled_image, num_features = label(binary_image)
-    object_sizes = np.bincount(labeled_image.flatten())
-    valid_objects = object_sizes > size_threshold
-    valid_labeled_image = np.where(np.isin(labeled_image, np.nonzero(valid_objects)[0]), labeled_image, 0)
-    valid_object_count = len(np.unique(valid_labeled_image)) - 1  # 배경 제외
-    return valid_labeled_image, valid_object_count
+# Streamlit 앱
+st.title("Object Detection & Brightness Enhancement")
+st.write("Upload a video to process it with YOLO and ZeroDCE models.")
 
+uploaded_file = st.file_uploader("Upload Video", type=["mp4", "avi"])
+if uploaded_file is not None:
+    with tempfile.NamedTemporaryFile(delete=False) as temp_input:
+        temp_input.write(uploaded_file.read())
+        input_video_path = temp_input.name
 
-# Task 3: 쌀알 개수 세기 (두 번째 코드 통합)
-def masking(image_np):
-    """Task 3: 바이너리 마스크 생성"""
-    f = np.array(image_np[:, :, 0])
-    binary_image = (f > 70).astype(np.int8)
-    return binary_image
+    output_video_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
 
+    # 모델 로드
+    st.write("Loading models...")
+    enhancement_model = load_enhancement_model("Iter_29000.pth")
+    yolo_model = load_yolo_model()
 
-def illumination_correction(image_np):
-    """Task 3: 조명 보정"""
-    blurred = gaussian_filter(image_np.astype(float), sigma=30)
-    corrected_image = image_np - blurred
-    corrected_image = np.clip(corrected_image, 0, 255).astype(np.uint8)
-    return corrected_image
+    # 비디오 처리
+    st.write("Processing video...")
+    process_video(input_video_path, output_video_path, yolo_model, enhancement_model)
 
-
-def erosion(binary_image):
-    """Task 3: Erosion 연산"""
-    eroded_image = binary_erosion(binary_image, structure=np.ones((3, 3))).astype(np.int8)
-    return eroded_image
-
-
-def connected(binary_image):
-    """Task 3: 연결된 성분 분석"""
-    labeled_image, num_features = label(binary_image)
-    return labeled_image, num_features
-
-
-# Main Process & Visualization
-def process_and_display(uploaded_image):
-    image = Image.open(uploaded_image)
-
-    if task == "Task 1: Count cookies on a bright background":
-        image_array = np.array(image.convert("L"))  # 흑백 변환
-        binary_image = binarize_image_task1(image_array)
-        processed_image = morphological_processing(binary_image)
-        labeled_image, object_count = count_objects(processed_image, size_threshold=500)
-        
-        # 시각화
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.image(image, caption="Original Image", use_column_width=True)
-        with col2:
-            st.image(processed_image * 255, caption="Processed Binary Image", use_column_width=True, clamp=True)
-        with col3:
-            st.image(labeled_image, caption="Connected Components", use_column_width=True, clamp=True)
-        st.subheader(f"Total number of cookies detected: {object_count}")
-
-    elif task == "Task 2: Count pens on a desk":
-        image_array = np.array(image.convert("L"))  # 흑백 변환
-        binary_image = binarize_image_task2(image_array)
-        processed_image = morphological_processing(binary_image)
-        labeled_image, object_count = count_objects(processed_image, size_threshold=500)
-        
-        # 시각화
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.image(image, caption="Original Image", use_column_width=True)
-        with col2:
-            st.image(processed_image * 255, caption="Processed Binary Image", use_column_width=True, clamp=True)
-        with col3:
-            st.image(labeled_image, caption="Connected Components", use_column_width=True, clamp=True)
-        st.subheader(f"Total number of pens detected: {object_count}")
-
-    elif task == "Task 3: Count grains on a dark background":
-        image_np = np.array(image)  # RGB 배열
-        corrected_image = illumination_correction(image_np)
-        binary_image = masking(corrected_image)
-        eroded_image = erosion(binary_image)
-        labeled_image, object_count = connected(eroded_image)
-
-        # 시각화
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.image(image, caption="Original Image", use_column_width=True)
-        with col2:
-            st.image(corrected_image, caption="Illumination Corrected Image", use_column_width=True)
-        with col3:
-            st.image(eroded_image * 255, caption="Eroded Binary Mask", use_column_width=True, clamp=True)
-        with col4:
-            st.image(labeled_image, caption="Connected Components", use_column_width=True, clamp=True)
-        st.subheader(f"Total number of grains detected: {object_count}")
-
-
-if uploaded_file:
-    process_and_display(uploaded_file)
+    # 비디오 다운로드
+    with open(output_video_path, "rb") as output_file:
+        st.download_button("Download Processed Video", output_file, "processed_video.mp4", "video/mp4")
