@@ -6,6 +6,7 @@ from torchvision import transforms
 from ultralytics import YOLO
 import tempfile
 from io import BytesIO
+import requests
 
 # ZeroDCE 모델 정의
 class enhance_net_nopool(torch.nn.Module):
@@ -40,10 +41,13 @@ class enhance_net_nopool(torch.nn.Module):
         enhance_image = x + r8 * (torch.pow(x, 2) - x)
         return enhance_image_1, enhance_image
 
-# 모델 로드
-def load_enhancement_model(pth_path):
+# GitHub URL에서 모델 다운로드 및 로드
+def load_enhancement_model(url):
+    response = requests.get(url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to download file from {url}. HTTP Status: {response.status_code}")
     model = enhance_net_nopool()
-    model.load_state_dict(torch.load(pth_path, map_location=torch.device("cpu")))
+    model.load_state_dict(torch.load(BytesIO(response.content), map_location=torch.device("cpu")))
     model.eval()
     return model
 
@@ -110,7 +114,7 @@ if uploaded_file is not None:
 
     # 모델 로드
     st.write("Loading models...")
-    enhancement_model = load_enhancement_model("Iter_29000.pth")
+    enhancement_model = load_enhancement_model("https://github.com/jeonginhwa3/a/raw/refs/heads/main/Iter_29000.pth")
     yolo_model = load_yolo_model()
 
     # 비디오 처리
@@ -120,3 +124,4 @@ if uploaded_file is not None:
     # 비디오 다운로드
     with open(output_video_path, "rb") as output_file:
         st.download_button("Download Processed Video", output_file, "processed_video.mp4", "video/mp4")
+
