@@ -121,6 +121,10 @@ if uploaded_file is not None:
     st.write("Processing video...")
     process_video(input_video_path, output_video_path, yolo_model, enhancement_model)
 
+    # 비디오 출력 (재생)
+    st.video(output_video_path)
+
     # 비디오 다운로드
     with open(output_video_path, "rb") as output_file:
         st.download_button("Download Processed Video", output_file, "processed_video.mp4", "video/mp4")
+
