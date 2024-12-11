@@ -7,7 +7,6 @@ from torchvision import transforms
 from ultralytics import YOLO
 from io import BytesIO
 import tempfile
-import os
 
 # ZeroDCE 모델 정의
 class enhance_net_nopool(torch.nn.Module):
@@ -50,13 +49,11 @@ class enhance_net_nopool(torch.nn.Module):
 # 모델 로드 함수
 @st.cache_resource
 def load_models():
-    # 모델 파일 경로 수정
-    model_path = "Iter_29000.pth"  # 여기에 모델 파일이 로컬에 있어야 합니다.
     enhancement_model = enhance_net_nopool()
-    enhancement_model.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+    enhancement_model.load_state_dict(torch.load("Iter_29000.pth", map_location=torch.device("cpu")))
     enhancement_model.eval()
 
-    yolo_model = YOLO("yolov8n.pt")  # YOLO 모델 경로
+    yolo_model = YOLO("yolov8n.pt")
     return enhancement_model, yolo_model
 
 # 영상 프레임을 텐서로 변환
@@ -115,10 +112,9 @@ st.write("Upload a video of a dark road to enhance brightness and detect objects
 uploaded_video = st.file_uploader("Upload Video", type=["mp4", "avi", "mov"])
 if uploaded_video is not None:
     with st.spinner("Processing..."):
-        # 모델 로드
         enhancement_model, yolo_model = load_models()
 
-        # 업로드된 비디오를 임시 파일로 저장
+        # Save uploaded video to a temporary file
         temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         temp_input.write(uploaded_video.read())
         temp_input.close()
@@ -128,3 +124,4 @@ if uploaded_video is not None:
     st.video(output_path)
     with open(output_path, "rb") as file:
         st.download_button("Download Processed Video", file, file_name="output_video.mp4", mime="video/mp4")
+
