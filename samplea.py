@@ -7,6 +7,7 @@ from ultralytics import YOLO
 import tempfile
 from io import BytesIO
 import requests
+import os
 
 # ZeroDCE 모델 정의
 class enhance_net_nopool(torch.nn.Module):
@@ -58,7 +59,7 @@ def load_yolo_model():
 
 # 프레임 전처리
 def preprocess_frame(frame):
-    transform = transforms.Compose([
+    transform = transforms.Compose([ 
         transforms.ToPILImage(),
         transforms.Resize((256, 256)),
         transforms.ToTensor(),
@@ -110,7 +111,7 @@ if uploaded_file is not None:
         temp_input.write(uploaded_file.read())
         input_video_path = temp_input.name
 
-    output_video_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+    output_video_path = os.path.join(tempfile.gettempdir(), "processed_video.mp4")
 
     # 모델 로드
     st.write("Loading models...")
