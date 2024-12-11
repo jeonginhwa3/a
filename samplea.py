@@ -50,19 +50,14 @@ class enhance_net_nopool(torch.nn.Module):
 # 모델 로드 함수
 @st.cache_resource
 def load_models():
-    try:
-        enhancement_model = enhance_net_nopool()
-        model_path = "Iter_29000.pth"
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"{model_path} not found")
-        enhancement_model.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
-        enhancement_model.eval()
+    # 모델 파일 경로 수정
+    model_path = "Iter_29000.pth"  # 여기에 모델 파일이 로컬에 있어야 합니다.
+    enhancement_model = enhance_net_nopool()
+    enhancement_model.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+    enhancement_model.eval()
 
-        yolo_model = YOLO("yolov8n.pt")
-        return enhancement_model, yolo_model
-    except Exception as e:
-        st.error(f"Error loading models: {e}")
-        return None, None
+    yolo_model = YOLO("yolov8n.pt")  # YOLO 모델 경로
+    return enhancement_model, yolo_model
 
 # 영상 프레임을 텐서로 변환
 def preprocess_frame(frame):
@@ -88,24 +83,17 @@ def process_video(input_video_path, enhancement_model, yolo_model):
             break
 
         # YOLO 객체 감지
-        try:
-            results = yolo_model(frame)
-            detected_frame = results[0].plot() if results[0].boxes is not None else None
-        except Exception as e:
-            st.error(f"Error during YOLO detection: {e}")
-            detected_frame = None
+        results = yolo_model(frame)
+        detected_frame = results[0].plot() if results[0].boxes is not None else None
 
         # ZeroDCE 밝기 개선
         input_tensor = preprocess_frame(frame)
         with torch.no_grad():
-            try:
-                _, enhanced_frame = enhancement_model(input_tensor)
-                enhanced_frame = enhanced_frame.squeeze(0).detach().numpy().transpose(1, 2, 0)
-                enhanced_frame = np.clip(enhanced_frame, 0, 1) * 255
-                enhanced_frame = enhanced_frame.astype(np.uint8)
-            except Exception as e:
-                st.error(f"Error during ZeroDCE enhancement: {e}")
-                enhanced_frame = frame
+            _, enhanced_frame = enhancement_model(input_tensor)
+
+        enhanced_frame = enhanced_frame.squeeze(0).detach().numpy().transpose(1, 2, 0)
+        enhanced_frame = np.clip(enhanced_frame, 0, 1) * 255
+        enhanced_frame = enhanced_frame.astype(np.uint8)
 
         if detected_frame is not None:
             detected_frame_resized = cv2.resize(detected_frame, (256, 256))
@@ -127,20 +115,16 @@ st.write("Upload a video of a dark road to enhance brightness and detect objects
 uploaded_video = st.file_uploader("Upload Video", type=["mp4", "avi", "mov"])
 if uploaded_video is not None:
     with st.spinner("Processing..."):
-        # 임시 입력 비디오 저장
+        # 모델 로드
+        enhancement_model, yolo_model = load_models()
+
+        # 업로드된 비디오를 임시 파일로 저장
         temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         temp_input.write(uploaded_video.read())
         temp_input.close()
 
-        enhancement_model, yolo_model = load_models()
-        if enhancement_model is not None and yolo_model is not None:
-            output_path = process_video(temp_input.name, enhancement_model, yolo_model)
-            st.success("Processing complete!")
-        else:
-            st.error("Model loading failed. Please check your setup.")
-            output_path = None
+        output_path = process_video(temp_input.name, enhancement_model, yolo_model)
 
-    if output_path:
-        st.video(output_path)
-        with open(output_path, "rb") as file:
-            st.download_button("Download Processed Video", file, file_name="output_video.mp4", mime="video/mp4")
+    st.video(output_path)
+    with open(output_path, "rb") as file:
+        st.download_button("Download Processed Video", file, file_name="output_video.mp4", mime="video/mp4")
