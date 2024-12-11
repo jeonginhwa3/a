@@ -7,6 +7,7 @@ from torchvision import transforms
 from ultralytics import YOLO
 from io import BytesIO
 import tempfile
+import requests
 
 # ZeroDCE 모델 정의
 class enhance_net_nopool(torch.nn.Module):
@@ -49,10 +50,24 @@ class enhance_net_nopool(torch.nn.Module):
 # 모델 로드 함수
 @st.cache_resource
 def load_models():
+    # ZeroDCE 모델 로드
     enhancement_model = enhance_net_nopool()
-    enhancement_model.load_state_dict(torch.load("Iter_29000.pth", map_location=torch.device("cpu")))
+
+    # 모델 파일 다운로드
+    model_url = "https://raw.githubusercontent.com/jeonginhwa3/a/refs/heads/main/Iter_29000.pth"
+    response = requests.get(model_url)
+    if response.status_code == 200:
+        with tempfile.NamedTemporaryFile(delete=False) as temp_model_file:
+            temp_model_file.write(response.content)
+            temp_model_path = temp_model_file.name
+    else:
+        raise RuntimeError(f"Failed to download model from {model_url}")
+
+    # 모델 가중치 로드
+    enhancement_model.load_state_dict(torch.load(temp_model_path, map_location=torch.device("cpu")))
     enhancement_model.eval()
 
+    # YOLO 모델 로드
     yolo_model = YOLO("yolov8n.pt")
     return enhancement_model, yolo_model
 
