@@ -127,9 +127,4 @@ if uploaded_file is not None:
     # 'output_video_path'를 바로 처리할 수 있도록 Streamlit이 인식하게 함.
     with open(output_video_path, "rb") as video_file:
         video_bytes = video_file.read()
-
-    # 동영상 다운로드 버튼
-    st.download_button(label="Download Processed Video", data=video_bytes, file_name="processed_video.mp4", mime="video/mp4")
-
-    # 동영상 재생
     st.video(video_bytes)  # 동영상 재생
