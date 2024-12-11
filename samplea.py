@@ -121,6 +121,6 @@ if uploaded_video is not None:
 
         output_path = process_video(temp_input.name, enhancement_model, yolo_model)
 
-    st.video(output_path)
+    st.video(output_path)  # 비디오 표시
     with open(output_path, "rb") as file:
         st.download_button("Download Processed Video", file, file_name="output_video.mp4", mime="video/mp4")
