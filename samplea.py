@@ -43,16 +43,11 @@ class enhance_net_nopool(torch.nn.Module):
 
 # GitHub URL에서 모델 다운로드 및 로드
 def load_enhancement_model(url):
-    try:
-        response = requests.get(url)
-        response.raise_for_status()  # HTTP 오류가 발생하면 예외를 발생시킴
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Error downloading the model from {url}: {e}")
-    
+    response = requests.get(url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to download file from {url}. HTTP Status: {response.status_code}")
     model = enhance_net_nopool()
-    state_dict = torch.load(BytesIO(response.content), map_location=torch.device("cpu"))
-    model.load_state_dict(state_dict)
-    
+    model.load_state_dict(torch.load(BytesIO(response.content), map_location=torch.device("cpu")))
     model.eval()
     return model
 
@@ -119,15 +114,8 @@ if uploaded_file is not None:
 
     # 모델 로드
     st.write("Loading models...")
-    try:
-        # 기존 URL을 새 URL로 변경
-        enhancement_model_url = "https://raw.githubusercontent.com/jeonginhwa3/a/refs/heads/main/Iter_29000.pth"
-        enhancement_model = load_enhancement_model(enhancement_model_url)
-        yolo_model = load_yolo_model()
-        st.write("Models loaded successfully!")
-    except Exception as e:
-        st.write(f"Error loading models: {e}")
-        st.stop()
+    enhancement_model = load_enhancement_model("https://github.com/jeonginhwa3/a/raw/refs/heads/main/Iter_29000.pth")
+    yolo_model = load_yolo_model()
 
     # 비디오 처리
     st.write("Processing video...")
