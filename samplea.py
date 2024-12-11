@@ -7,19 +7,7 @@ from torchvision import transforms
 from ultralytics import YOLO
 from io import BytesIO
 import tempfile
-import requests
-import logging
-
-# 로깅 설정
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-# OpenCV 테스트
-try:
-    logger.info(f"OpenCV version: {cv2.__version__}")
-except Exception as e:
-    logger.error(f"OpenCV initialization failed: {e}")
-    st.error(f"OpenCV initialization failed: {e}")
+import os
 
 # ZeroDCE 모델 정의
 class enhance_net_nopool(torch.nn.Module):
@@ -62,15 +50,19 @@ class enhance_net_nopool(torch.nn.Module):
 # 모델 로드 함수
 @st.cache_resource
 def load_models():
-    enhancement_model = enhance_net_nopool()
-    enhancement_model.load_state_dict(torch.hub.load_state_dict_from_url(
-        "https://raw.githubusercontent.com/jeonginhwa3/a/refs/heads/main/Iter_29000.pth", 
-        map_location=torch.device("cpu")
-    ))
-    enhancement_model.eval()
+    try:
+        enhancement_model = enhance_net_nopool()
+        model_path = "Iter_29000.pth"
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"{model_path} not found")
+        enhancement_model.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+        enhancement_model.eval()
 
-    yolo_model = YOLO("yolov8n.pt")
-    return enhancement_model, yolo_model
+        yolo_model = YOLO("yolov8n.pt")
+        return enhancement_model, yolo_model
+    except Exception as e:
+        st.error(f"Error loading models: {e}")
+        return None, None
 
 # 영상 프레임을 텐서로 변환
 def preprocess_frame(frame):
@@ -96,17 +88,24 @@ def process_video(input_video_path, enhancement_model, yolo_model):
             break
 
         # YOLO 객체 감지
-        results = yolo_model(frame)
-        detected_frame = results[0].plot() if results[0].boxes is not None else None
+        try:
+            results = yolo_model(frame)
+            detected_frame = results[0].plot() if results[0].boxes is not None else None
+        except Exception as e:
+            st.error(f"Error during YOLO detection: {e}")
+            detected_frame = None
 
         # ZeroDCE 밝기 개선
         input_tensor = preprocess_frame(frame)
         with torch.no_grad():
-            _, enhanced_frame = enhancement_model(input_tensor)
-
-        enhanced_frame = enhanced_frame.squeeze(0).detach().numpy().transpose(1, 2, 0)
-        enhanced_frame = np.clip(enhanced_frame, 0, 1) * 255
-        enhanced_frame = enhanced_frame.astype(np.uint8)
+            try:
+                _, enhanced_frame = enhancement_model(input_tensor)
+                enhanced_frame = enhanced_frame.squeeze(0).detach().numpy().transpose(1, 2, 0)
+                enhanced_frame = np.clip(enhanced_frame, 0, 1) * 255
+                enhanced_frame = enhanced_frame.astype(np.uint8)
+            except Exception as e:
+                st.error(f"Error during ZeroDCE enhancement: {e}")
+                enhanced_frame = frame
 
         if detected_frame is not None:
             detected_frame_resized = cv2.resize(detected_frame, (256, 256))
@@ -128,16 +127,20 @@ st.write("Upload a video of a dark road to enhance brightness and detect objects
 uploaded_video = st.file_uploader("Upload Video", type=["mp4", "avi", "mov"])
 if uploaded_video is not None:
     with st.spinner("Processing..."):
-        enhancement_model, yolo_model = load_models()
-
-        # Save uploaded video to a temporary file
+        # 임시 입력 비디오 저장
         temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         temp_input.write(uploaded_video.read())
         temp_input.close()
 
-        output_path = process_video(temp_input.name, enhancement_model, yolo_model)
+        enhancement_model, yolo_model = load_models()
+        if enhancement_model is not None and yolo_model is not None:
+            output_path = process_video(temp_input.name, enhancement_model, yolo_model)
+            st.success("Processing complete!")
+        else:
+            st.error("Model loading failed. Please check your setup.")
+            output_path = None
 
-    st.video(output_path)
-    with open(output_path, "rb") as file:
-        st.download_button("Download Processed Video", file, file_name="output_video.mp4", mime="video/mp4")
-
+    if output_path:
+        st.video(output_path)
+        with open(output_path, "rb") as file:
+            st.download_button("Download Processed Video", file, file_name="output_video.mp4", mime="video/mp4")
