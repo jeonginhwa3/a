@@ -110,6 +110,7 @@ if uploaded_file is not None:
         temp_input.write(uploaded_file.read())
         input_video_path = temp_input.name
 
+    # Output video file path
     output_video_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
 
     # 모델 로드
@@ -127,4 +128,3 @@ if uploaded_file is not None:
     # 비디오 다운로드
     with open(output_video_path, "rb") as output_file:
         st.download_button("Download Processed Video", output_file, "processed_video.mp4", "video/mp4")
-
